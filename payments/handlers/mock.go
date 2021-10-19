@@ -67,32 +67,40 @@ func (m *userMock) Authorize(idempotencyKey string, amount uint) error {
 	})
 }
 
-func (m *userMock) Capture(idempotencyKey string, amount uint) error {
+func (m *userMock) Capture(idempotencyKey string, amount uint) (uint, error) {
 	authorizedBalance := m.AuthorizedBalance()
 	if authorizedBalance < amount {
-		return errors.New("cannot capture more than authorized")
+		return 0, errors.New("cannot capture more than authorized")
 	}
 
-	return m.ifNotHandled(idempotencyKey, func() {
+	err := m.ifNotHandled(idempotencyKey, func() {
 		m.authorizedBalance -= amount
 		m.balance += int(amount)
 	})
+	if err == nil {
+		return amount, nil
+	}
+	return 0, err
 }
 
-func (m *userMock) Release(idempotencyKey string, amount uint) error {
+func (m *userMock) Release(idempotencyKey string, amount uint) (uint, error) {
 	authorizedBalance := m.AuthorizedBalance()
 	if authorizedBalance < amount {
-		return errors.New("cannot release more than authorized")
+		return 0, errors.New("cannot release more than authorized")
 	}
-	return m.ifNotHandled(idempotencyKey, func() {
+	err := m.ifNotHandled(idempotencyKey, func() {
 		m.authorizedBalance -= amount
 	})
+	if err != nil {
+		return 0, err
+	}
+	return amount, err
 }
 
-func (m *userMock) CaptureRelease(captureKey string, capture uint, releaseKey string, release uint) (error, error) {
-	captureErr := m.Capture(captureKey, capture)
-	releaseErr := m.Release(releaseKey, release)
-	return captureErr, releaseErr
+func (m *userMock) CaptureRelease(captureKey string, capture uint, releaseKey string, release uint) (uint, error, uint, error) {
+	captured, captureErr := m.Capture(captureKey, capture)
+	released, releaseErr := m.Release(releaseKey, release)
+	return captured, captureErr, released, releaseErr
 }
 
 func (m *userMock) Charge(idempotencyKey string, amount uint) error {
@@ -101,10 +109,14 @@ func (m *userMock) Charge(idempotencyKey string, amount uint) error {
 	})
 }
 
-func (m *userMock) Refund(idempotencyKey string, amount uint) error {
-	return m.ifNotHandled(idempotencyKey, func() {
+func (m *userMock) Refund(idempotencyKey string, amount uint) (uint, error) {
+	err := m.ifNotHandled(idempotencyKey, func() {
 		m.balance -= int(amount)
 	})
+	if err != nil {
+		return 0, err
+	}
+	return amount, nil
 }
 
 func NewPartnerMock() *partnerMock {

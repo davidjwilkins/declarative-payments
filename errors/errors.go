@@ -9,4 +9,5 @@ var ErrDifferentPartner = errors.New("cannot resolve payment states for differen
 var ErrDateInFuture = errors.New("date of desired state is in the future")
 var ErrLaterStateApplied = errors.New("desired state date is not the most current")
 var ErrRetryable = errors.New("retryable")
+var ErrChargeFailed = errors.New("charge failed")
 var Is = errors.Is

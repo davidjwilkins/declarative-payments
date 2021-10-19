@@ -17,11 +17,11 @@ type PartnerHandler interface {
 
 type UserHandler interface {
 	Authorize(idempotencyKey string, amount uint) error
-	Capture(idempotencyKey string, amount uint) error
-	Release(idempotencyKey string, amount uint) error
-	CaptureRelease(captureKey string, capture uint, releaseKey string, release uint) (error, error)
+	Capture(idempotencyKey string, amount uint) (uint, error)
+	Release(idempotencyKey string, amount uint) (uint, error)
+	CaptureRelease(captureKey string, capture uint, releaseKey string, release uint) (uint, error, uint, error)
 	Charge(idempotencyKey string, amount uint) error
-	Refund(idempotencyKey string, amount uint) error
+	Refund(idempotencyKey string, amount uint) (uint, error)
 }
 
 type ActualState struct {
@@ -125,24 +125,26 @@ func (h *handler) Run(cmds []resolver.PaymentCommand) ([]resolver.PaymentCommand
 				// Some handlers do not support incremental capturing - when you capture, the remainder is released.  For
 				// these, they will need to know how much to capture and release at the same time.
 				if captureRelease.release == nil {
-					err = h.user.Capture(key, cmds[i].Amount)
+					var captured uint
+					captured, err = h.user.Capture(key, cmds[i].Amount)
 					if err == nil {
 						h.Lock()
-						h.currentState.AuthorizedAmount -= cmds[i].Amount
-						h.currentState.Amount += int(cmds[i].Amount)
+						h.currentState.AuthorizedAmount -= captured
+						h.currentState.Amount += int(captured)
 						h.Unlock()
 					}
 				} else {
-					captureErr, releaseErr := h.user.CaptureRelease(captureRelease.capture.ID.String(), captureRelease.capture.Amount, captureRelease.release.ID.String(), captureRelease.release.Amount)
+					var captured, released uint
+					captured, captureErr, released, releaseErr := h.user.CaptureRelease(captureRelease.capture.ID.String(), captureRelease.capture.Amount, captureRelease.release.ID.String(), captureRelease.release.Amount)
 					if captureErr == nil {
 						h.Lock()
-						h.currentState.AuthorizedAmount -= captureRelease.capture.Amount
-						h.currentState.Amount += int(captureRelease.capture.Amount)
+						h.currentState.AuthorizedAmount -= captured
+						h.currentState.Amount += int(captured)
 						h.Unlock()
 					}
 					if releaseErr == nil {
 						h.Lock()
-						h.currentState.AuthorizedAmount -= captureRelease.release.Amount
+						h.currentState.AuthorizedAmount -= released
 						h.Unlock()
 					}
 					handleErr(captureErr, captureRelease.captureIndex)
@@ -150,10 +152,11 @@ func (h *handler) Run(cmds []resolver.PaymentCommand) ([]resolver.PaymentCommand
 				}
 			case consts.PaymentCommandActionRelease:
 				if captureRelease.capture == nil {
-					err = h.user.Release(key, cmds[i].Amount)
+					var released uint
+					released, err = h.user.Release(key, cmds[i].Amount)
 					if err == nil {
 						h.Lock()
-						h.currentState.AuthorizedAmount -= cmds[i].Amount
+						h.currentState.AuthorizedAmount -= released
 						h.Unlock()
 					}
 				}
@@ -165,10 +168,11 @@ func (h *handler) Run(cmds []resolver.PaymentCommand) ([]resolver.PaymentCommand
 					h.Unlock()
 				}
 			case consts.PaymentCommandActionRefund:
-				err = h.user.Refund(key, cmds[i].Amount)
+				var refunded uint
+				refunded, err = h.user.Refund(key, cmds[i].Amount)
 				if err == nil {
 					h.Lock()
-					h.currentState.Amount -= int(cmds[i].Amount)
+					h.currentState.Amount -= int(refunded)
 					h.Unlock()
 				}
 			case consts.PaymentCommandActionDeposit:
